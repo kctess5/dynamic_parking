@@ -36,8 +36,8 @@ endif()
 # set(CMAKE_CXX_FLAGS "-fverbose-asm -ffast-math -fno-math-errno -save-temps ${CMAKE_CXX_FLAGS}")
 # set(CMAKE_CXX_FLAGS "-g -save-temps ${CMAKE_CXX_FLAGS}")
 
-set(CMAKE_BUILD_TYPE Debug)
-# set(CMAKE_BUILD_TYPE Release)
+# set(CMAKE_BUILD_TYPE Debug)
+set(CMAKE_BUILD_TYPE Release)
 
 add_executable(dp_parking ${SRCS})
 target_link_libraries(dp_parking gflags pthread)

@@ -41,12 +41,21 @@
 #define _EPSILON 0.0000001
 #define M_2PI 6.2831853071795864769252867665590
 
-#define MAX_COST 10000000
+#define MAX_COST 1000000
+
+#define DISCOUNT 0.999
+
+#define CHANGE_PENALTY 0.05
 
 #define _INTERP_AVOID_MEMREADS 1
+#define _REPLACE_J 1
 
 #define RESCALE(ind, disc, min_val, max_val) ((max_val - min_val) * (float)ind / (float)(disc) + min_val)
 #define UNSCALE(val, disc, min_val, max_val) ((disc) * (val - min_val) /(max_val - min_val))
+
+#define RESCALE_T(ind, disc) (M_2PI * (state_T)(ind) / (state_T)(disc))
+#define UNSCALE_T(val, disc) ((disc) * (val) / M_2PI)
+
 
 // No inline
 #if _NO_INLINE == 1
@@ -54,6 +63,13 @@
 #else
 #define ANIL 
 #endif
+
+
+std::string padded(int val, int num_zeros) {
+  std::ostringstream ss;
+  ss << std::setw(num_zeros) << std::setfill('0') << val;
+  return ss.str();
+}
 
 namespace dp {
 	template <typename T>
@@ -95,9 +111,9 @@ namespace dp {
 
 		T interp(float x, float y, float z) const{
 			assert(x >= 0 && x <= d0-1); assert(y >= 0 && y <= d1-1);
-			float x_l = fmodf(x, 1.f);
-			float y_l = fmodf(y, 1.f);
-			float z_l = fmodf(z, 1.f);
+			float x_l = fmod(x, 1.f);
+			float y_l = fmod(y, 1.f);
+			float z_l = fmod(z, 1.f);
 
 			float one_minus_x_l = 1.0 - x_l;
 			float one_minus_y_l = 1.0 - y_l;
@@ -201,11 +217,22 @@ namespace dp {
 			std::vector<OmniAction<T> > actions;
 			T coeff = M_2PI / (T)discretization;
 			for (int i = 0; i < discretization; ++i)
-				actions.push_back(OmniAction<T> (coeff * i));
+				actions.push_back(OmniAction<T>(coeff * i));
+			// stop action
+			actions.push_back(OmniAction<T>());
 			return actions;
 		};
 
 		void apply(OmniAction<T> action, T x, T y, T z, T &ax, T &ay, T &az) {
+
+			if (action.direction < 0) {
+				ax = x; ay = y; az = z;
+			} else {
+				// az = action.direction;
+				az = fmod(z + action.direction, M_2PI);
+				ax = x + step_size * cos(az);
+				ay = y + step_size * sin(az);
+			}
 			// az = z + action.direction;
 			// ax = x + step_size * cosf(az);
 			// ay = y + step_size * sinf(az);
@@ -216,12 +243,14 @@ namespace dp {
 			
 			// az = fmodf(z + action.direction, M_2PI);
 			// az = action.direction;
-			az = action.direction + z;
-			ax = x + step_size * cos(az);
-			ay = y + step_size * sin(az);
+			// az = action.direction + z;
 		}
 
-		T cost(OmniAction<T> action) { return step_size; }
+		T cost(OmniAction<T> action) { 
+			if (action.direction < 0) return 0.0;
+			if (action.direction == 0) return step_size;
+			return step_size + CHANGE_PENALTY; 
+		}
 	
 	private:
 		T step_size;
@@ -233,7 +262,7 @@ namespace dp {
 	{
 	public:
 		ValueIterator() {
-			dims = {100,100,1};
+			dims = {200,200,10};
 			min_vals = {0.0,0.0, 0.0};
 			max_vals = {1.0,1.0, M_2PI};
 
@@ -241,22 +270,34 @@ namespace dp {
 			J->fill(MAX_COST);
 			Policy = new Array3D<OmniAction<state_T> >(dims[0], dims[1], dims[2]);
 
-			// action_model = new OmniActionModel(0.01 * dims[0], 4);
-			action_model = new OmniActionModel<state_T>(2.0, 4);
+			#if _REPLACE_J == 1
+			J_prime = new Array3D<state_T>(dims[0], dims[1], dims[2]);
+			#endif
+
+			action_model = new OmniActionModel<state_T>(2.0, 8);
 			
 			OmniAction<state_T> null_action;
 			Policy->fill(null_action);
 
-			// mark the center region as the goal
-			// for (int x = 50; x < 55; ++x)
-			// 	for (int y = 50; y < 55; ++y)
+			// for (int x = 47; x < 54; ++x)
+			// 	for (int y = 47; y < 54; ++y)
 			// 		for (int t = 0; t < dims[2]; ++t)
 			// 			J->at(x,y,t) = 0.0;
 
-			for (int x = 47; x < 54; ++x)
-				for (int y = 47; y < 54; ++y)
+			for (int x = dims[0]/2-2; x < dims[0]/2+3; ++x)
+				for (int y = dims[1]/2-2; y < dims[1]/2+3; ++y)
 					for (int t = 0; t < dims[2]; ++t)
 						J->at(x,y,t) = 0.0;
+
+			// for (int x = 97; x < 104; ++x)
+			// 	for (int y = 97; y < 104; ++y)
+			// 		for (int t = 0; t < dims[2]; ++t)
+			// 			J->at(x,y,t) = 0.0;
+
+			// for (int x = 6; x < 10; ++x)
+			// 	for (int y = 6; y < 10; ++y)
+			// 		for (int t = 0; t < dims[2]; ++t)
+			// 			J->at(x,y,t) = 0.0;
 
 			// for (int t = 0; t < dims[2]; ++t){
 			// 	J->at(4,4,t) = 0.0;
@@ -264,26 +305,8 @@ namespace dp {
 			// 	J->at(5,4,t) = 0.0;
 			// 	J->at(5,5,t) = 0.0;
 			// }
-			
-			// J->at(4,4,1) = 0.0;
 
-			
-
-			// std::cout << RESCALE(25, 50, 0.0, 1.0) << std::endl;
-			// std::cout << UNSCALE((RESCALE(25, 50, 0.0, 1.0)), 50, 0.0, 1.0) << std::endl;
-
-			// for (int i = 0; i < 50; ++i)
-			// {
-			// 	std::cout << UNSCALE((RESCALE(i, 50, 0.0, 1.0)), 50, 0.0, 1.0) << std::endl;
-			// }
-			// std::cout << RESCALE(25, 50, 0.0, 1.0) << std::endl;
-			// std::cout << UNSCALE((RESCALE(25, 50, 0.0, 1.0)), 50, 0.0, 1.0) << std::endl;
-
-			// std::cout << "slice 1" << std::endl;
-			// J->printSlice(0, 3);
-			
-			
-			int steps = 100;
+			int steps = 80;
 
 			auto start_time = std::chrono::high_resolution_clock::now();
 			// policy iteration
@@ -292,7 +315,8 @@ namespace dp {
 				std::cout << "Step: " << i << std::endl;
 				step();
 
-				// save_slice(0,1,1,"test.png");
+				save_slice(0,1,0,"./sequence/" + padded(i,3) + ".png");
+				save_policy(0,1,0,"./policy_sequence/" + padded(i,3) + ".png");
 			}
 
 			auto end_time = std::chrono::high_resolution_clock::now();
@@ -340,12 +364,11 @@ namespace dp {
 		};
 		~ValueIterator() {};
 
-		float cost_at(float x, float y, float z) {
+		state_T cost_at(state_T x, state_T y, state_T z) {
 			if (x < 0 || x > dims[0] - 1 || y < 0 || y > dims[1] - 1) {
-				// bad++;
-				return MAX_COST;
+				// out of bounds cost
+				return MAX_COST * 2.0;
 			} else {
-				// good++;
 				return J->interp(x,y,z);
 			}
 		}
@@ -353,6 +376,7 @@ namespace dp {
 		// run a single step of value iteration
 		void step() {
 			std::vector<OmniAction<state_T> > actions = action_model->enumerate();
+			OmniAction<state_T> stop = OmniAction<state_T>();
 
 			// preallocate space for the various variables for speed
 			state_T sx, sy, sz;
@@ -361,58 +385,41 @@ namespace dp {
 			int i, min_i;
 			state_T min_cost;
 			state_T alt_cost;
-
-			Array3D<state_T>* J_prime = new Array3D<state_T>(dims[0], dims[1], dims[2]);
 			J_prime->fill(MAX_COST);
 
-			bool debug = 0;
-
+			// bool debug = 1;
 			int x,y,z;
 			for (x = 0; x < dims[0]; ++x) {
 				for (y = 0; y < dims[1]; ++y) {
 					for (z = 0; z < dims[2]; ++z) {
-						// the baseline is the "do nothing" cost
 						min_i = -1;
-						min_cost = cost_at(x, y, z);
-
-						if (debug && z == 0) std::cout << "state: ("<<x<<", "<<y<<", "<<z<<"), cost: " << min_cost << std::endl;
+						min_cost = MAX_COST*10.0;
+						// if (debug && z == 0) std::cout << "state: ("<<x<<", "<<y<<", "<<z<<"), cost: " << min_cost << std::endl;
 
 						for (i = 0; i < actions.size(); ++i) {
-							action_model->apply(actions[i], x, y, z, ax, ay, az);
-
+							action_model->apply(actions[i], x, y, RESCALE_T(z, dims[2]), ax, ay, az);
+							az = UNSCALE_T(az, dims[2]);
 							
-							alt_cost = cost_at(ax, ay, az);
-							if (debug && z == 0) std::cout << "     + "<<actions[i].direction<<" --> ("<<ax<< ", "<<ay<<", "<<az<<") @ "<<alt_cost;
-							if (alt_cost < min_cost && alt_cost < MAX_COST-1) {
+							alt_cost = cost_at(ax, ay, az) + action_model->cost(actions[i]);
+							// if (debug && z == 0) std::cout << "     + "<<actions[i].direction<<" --> ("<<ax<< ", "<<ay<<", "<<az<<") @ "<<alt_cost;
+							if (alt_cost < min_cost-_EPSILON) {
 								min_cost = alt_cost;
 								min_i = i;
-								if (debug && z == 0) std::cout << "***";
+								// if (debug && z == 0) std::cout << "***";
 							}
-							if (debug && z == 0) std::cout <<std::endl;
+							// if (debug && z == 0) std::cout <<std::endl;
 						}
 						
-						// if the do nothing option is optimal, do not modify cost, only policy
-						if (min_i == -1) {
-							Policy->at(x,y,z) = OmniAction<state_T>();
-							J_prime->at(x,y,z) = min_cost;
+						// This should never happen - the algorithm must always make a choice
+						assert(min_i >= 0);
 
-							if (debug && z == 0) std::cout << "   best action: stop --> ("<<ax<< ", "<<ay<<", "<<az<<") @ "<<min_cost<<std::endl;
-						} else {
-
-							if (debug && z == 0) std::cout << "   best action: "<<actions[min_i].direction<<" --> ("<<ax<< ", "<<ay<<", "<<az<<") @ "<<min_cost<<std::endl;
-							// std::cout << "TEST" << std::endl;
-							// otherwise, modify both the policy and the minimum cost to reflect the found results
-							Policy->at(x,y,z) = actions[min_i];
-							J_prime->at(x,y,z) = min_cost + action_model->cost(actions[min_i]);
-							// std::cout << "TEST: " << min_cost << "  " << action_model->cost(actions[min_i]) << std::endl;
-						}
+						// modify the policy and the cost to reflect the iteration
+						Policy->at(x,y,z) = actions[min_i];
+						J_prime->at(x,y,z) = min_cost;
 					}
 				}
 			}
-
 			J->replace(J_prime);
-			// std::cout << "good: " << good << std::endl;
-			// std::cout << "bad: " << bad << std::endl;
 		}
 
 		bool save_slice(int dim1, int dim2, int ind, std::string filename) {
@@ -424,14 +431,16 @@ namespace dp {
 
 			float max_val = 0.0;
 
-			for (int y = 0; y < height; ++y) {
-				for (int x = 0; x < width; ++x) {
-					unsigned idx = 4 * y * width + 4 * x;
-					float val = J->at(x,y,ind);
-					if (val < 1000 and val > max_val)
-						max_val = val;
-				}
-			}
+			// for (int y = 0; y < height; ++y) {
+			// 	for (int x = 0; x < width; ++x) {
+			// 		unsigned idx = 4 * y * width + 4 * x;
+			// 		float val = J->at(x,y,ind);
+			// 		if (val < 100 and val > max_val)
+			// 			max_val = val;
+			// 	}
+			// }
+
+			max_val = 120.0;
 
 			for (int y = 0; y < height; ++y) {
 				for (int x = 0; x < width; ++x) {
@@ -439,15 +448,19 @@ namespace dp {
 					float val = J->at(x,y,ind);
 
 					if (val > 1000) {
-						val = 255;
+						image[idx + 2] = (char)255;
+						image[idx + 1] = (char)255;
+						image[idx + 0] = (char)255;
+						image[idx + 3] = (char)255;
 					} else {
 						val = 150.0 * val / max_val;
+						image[idx + 2] = (char)val;
+						image[idx + 1] = (char)val;
+						image[idx + 0] = (char)val;
+						image[idx + 3] = (char)255;
 					}
 
-					image[idx + 2] = (char)val;
-					image[idx + 1] = (char)val;
-					image[idx + 0] = (char)val;
-					image[idx + 3] = (char)255;
+					
 				}
 			}
 			unsigned error = lodepng::encode(png, reinterpret_cast<const unsigned char*> (image), width, height, state);
@@ -470,7 +483,7 @@ namespace dp {
 				for (int x = 0; x < width; ++x) {
 					unsigned idx = 4 * y * width + 4 * x;
 					float val = Policy->at(x,y,ind).direction;
-					if (val < 100000 and val > max_val)
+					if (val < 100 and val > max_val)
 						max_val = val;
 				}
 			}
@@ -480,18 +493,25 @@ namespace dp {
 					unsigned idx = 4 * y * width + 4 * x;
 					float val = Policy->at(x,y,ind).direction;
 
-					if (val > 100000) {
-						val = 255;
-					} else if (val == -1.0) {
-						val = 255;
+					if (val == -1.0) {
+						image[idx + 2] = (char)255;
+						image[idx + 1] = (char)0;
+						image[idx + 0] = (char)0;
+						image[idx + 3] = (char)255;
 					} else {
-						val = 150.0 * val / max_val;
+						if (val > 100) {
+							val = 255;
+						} else {
+							val = 150.0 * val / max_val;
+						}
+
+						image[idx + 2] = (char)val;
+						image[idx + 1] = (char)val;
+						image[idx + 0] = (char)val;
+						image[idx + 3] = (char)255;
 					}
 
-					image[idx + 2] = (char)val;
-					image[idx + 1] = (char)val;
-					image[idx + 0] = (char)val;
-					image[idx + 3] = (char)255;
+					
 				}
 			}
 			unsigned error = lodepng::encode(png, reinterpret_cast<const unsigned char*> (image), width, height, state);
@@ -508,6 +528,10 @@ namespace dp {
 
 		Array3D<state_T>* J;
 		Array3D<OmniAction<state_T> >* Policy;
+
+		#if _REPLACE_J == 1
+		Array3D<state_T>* J_prime;
+		#endif
 
 		OmniActionModel<state_T> * action_model;
 		std::vector<int> dims;
