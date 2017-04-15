@@ -47,7 +47,7 @@ int main(int argc, char *argv[])
 
 	std::cout << "start." << std::endl;
 
-	ValueIterator vi = ValueIterator();
+	ValueIterator<float> vi = ValueIterator<float>();
 
 	std::cout << FLAGS_test_flag << std::endl;
 
