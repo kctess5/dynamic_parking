@@ -42,9 +42,7 @@
 #define M_2PI 6.2831853071795864769252867665590
 
 #define MAX_COST 1000000
-
 #define DISCOUNT 0.999
-
 #define CHANGE_PENALTY 0.05
 
 #define _INTERP_AVOID_MEMREADS 1
@@ -224,7 +222,6 @@ namespace dp {
 		};
 
 		void apply(OmniAction<T> action, T x, T y, T z, T &ax, T &ay, T &az) {
-
 			if (action.direction < 0) {
 				ax = x; ay = y; az = z;
 			} else {
@@ -236,11 +233,9 @@ namespace dp {
 			// az = z + action.direction;
 			// ax = x + step_size * cosf(az);
 			// ay = y + step_size * sinf(az);
-
 			// az = 0.0;
 			// ax = x + step_size * cos(action.direction);
 			// ay = y + step_size * sin(action.direction);
-			
 			// az = fmodf(z + action.direction, M_2PI);
 			// az = action.direction;
 			// az = action.direction + z;
@@ -257,112 +252,61 @@ namespace dp {
 		int discretization;
 	};
 
-	template <typename state_T>
-	class ValueIterator
+	/*
+	This class uses ackerman dynamics as the state space
+	*/
+	template <typename T>
+	class NonHolonomicModel
 	{
 	public:
-		ValueIterator() {
-			dims = {200,200,10};
-			min_vals = {0.0,0.0, 0.0};
-			max_vals = {1.0,1.0, M_2PI};
+		NonHolonomicModel(T ss, int disc) : step_size(ss), discretization(disc) {};
+		~NonHolonomicModel() {};
 
+		std::vector<OmniAction<T> > enumerate() {
+			std::vector<OmniAction<T> > actions;
+			T coeff = M_2PI / (T)discretization;
+			for (int i = 0; i < discretization; ++i)
+				actions.push_back(OmniAction<T>(coeff * i));
+			// stop action
+			actions.push_back(OmniAction<T>());
+			return actions;
+		};
+
+		void apply(OmniAction<T> action, T x, T y, T z, T &ax, T &ay, T &az) {
+			if (action.direction < 0) {
+				ax = x; ay = y; az = z;
+			} else {
+				// az = action.direction;
+				az = fmod(z + action.direction, M_2PI);
+				ax = x + step_size * cos(az);
+				ay = y + step_size * sin(az);
+			}
+		}
+
+		T cost(OmniAction<T> action) { 
+			if (action.direction < 0) return 0.0;
+			if (action.direction == 0) return step_size;
+			return step_size + CHANGE_PENALTY; 
+		}
+	
+	private:
+		T step_size;
+		int discretization;
+	};
+
+	template <typename state_T, typename action_T, typename action_model_T>
+	class AbstractValueIterator
+	{
+	public:
+		AbstractValueIterator(std::vector<int> &d, std::vector<float> &min_v, std::vector<float> &max_v) : dims(d), min_vals(min_v), max_vals(max_v) {
 			J = new Array3D<state_T>(dims[0], dims[1], dims[2]);
 			J->fill(MAX_COST);
-			Policy = new Array3D<OmniAction<state_T> >(dims[0], dims[1], dims[2]);
-
-			#if _REPLACE_J == 1
 			J_prime = new Array3D<state_T>(dims[0], dims[1], dims[2]);
-			#endif
-
-			action_model = new OmniActionModel<state_T>(2.0, 8);
 			
-			OmniAction<state_T> null_action;
-			Policy->fill(null_action);
-
-			// for (int x = 47; x < 54; ++x)
-			// 	for (int y = 47; y < 54; ++y)
-			// 		for (int t = 0; t < dims[2]; ++t)
-			// 			J->at(x,y,t) = 0.0;
-
-			for (int x = dims[0]/2-2; x < dims[0]/2+3; ++x)
-				for (int y = dims[1]/2-2; y < dims[1]/2+3; ++y)
-					for (int t = 0; t < dims[2]; ++t)
-						J->at(x,y,t) = 0.0;
-
-			// for (int x = 97; x < 104; ++x)
-			// 	for (int y = 97; y < 104; ++y)
-			// 		for (int t = 0; t < dims[2]; ++t)
-			// 			J->at(x,y,t) = 0.0;
-
-			// for (int x = 6; x < 10; ++x)
-			// 	for (int y = 6; y < 10; ++y)
-			// 		for (int t = 0; t < dims[2]; ++t)
-			// 			J->at(x,y,t) = 0.0;
-
-			// for (int t = 0; t < dims[2]; ++t){
-			// 	J->at(4,4,t) = 0.0;
-			// 	J->at(4,5,t) = 0.0;
-			// 	J->at(5,4,t) = 0.0;
-			// 	J->at(5,5,t) = 0.0;
-			// }
-
-			int steps = 80;
-
-			auto start_time = std::chrono::high_resolution_clock::now();
-			// policy iteration
-			for (int i = 0; i < steps; ++i)
-			{
-				std::cout << "Step: " << i << std::endl;
-				step();
-
-				save_slice(0,1,0,"./sequence/" + padded(i,3) + ".png");
-				save_policy(0,1,0,"./policy_sequence/" + padded(i,3) + ".png");
-			}
-
-			auto end_time = std::chrono::high_resolution_clock::now();
-			std::chrono::duration<double> time_span = std::chrono::duration_cast<std::chrono::duration<double>>(end_time - start_time);
-			std::cout << "Done in: " << time_span.count() << std::endl;
-			std::cout << "  - per step: " << time_span.count() / steps << std::endl;
-
-			// std::cout << "slice 1" << std::endl;
-			// J->printSlice(0, 3);
-
-			// if (dims[2] > 1) {
-			// 	std::cout << "slice 2" << std::endl;
-			// 	J->printSlice(1, 3);
-			// }
-
-			// std::cout << "slice 1" << std::endl;
-			// J->printSlice(0, 3);
-
-			// std::cout << "slice 2" << std::endl;
-			// J->printSlice(1, 3);
-
-			// int places = 3;
-			// float factor = pow(10.0, places);
-
-			// for (int y = 0; y < dims[1]; ++y)
-			// {
-			// 	for (int x = 0; x < dims[0]; ++x)
-			// 	{
-			// 		std::cout << round(J->at(x,y,0) * factor) / factor << "  ";
-			// 	}
-			// 	std::cout << std::endl;
-			// }
-			save_slice(0,1,0,"test.png");
-			save_policy(0,1,0,"policy.png");
-			if (dims[2] > 1) {
-				save_slice(0,1,1,"test2.png");
-				save_policy(0,1,1,"policy2.png");
-			}
-
-
-			
-
-
-			// save_slice(0,1,0,"test.png");
+			Policy = new Array3D<action_T >(dims[0], dims[1], dims[2]);
+			Policy->fill(action_T()); // null action
 		};
-		~ValueIterator() {};
+		~AbstractValueIterator() {};
 
 		state_T cost_at(state_T x, state_T y, state_T z) {
 			if (x < 0 || x > dims[0] - 1 || y < 0 || y > dims[1] - 1) {
@@ -373,10 +317,11 @@ namespace dp {
 			}
 		}
 
+		void set_action_model(action_model_T * am) { action_model = am; }
+
 		// run a single step of value iteration
 		void step() {
-			std::vector<OmniAction<state_T> > actions = action_model->enumerate();
-			OmniAction<state_T> stop = OmniAction<state_T>();
+			std::vector<action_T > actions = action_model->enumerate();
 
 			// preallocate space for the various variables for speed
 			state_T sx, sy, sz;
@@ -422,59 +367,11 @@ namespace dp {
 			J->replace(J_prime);
 		}
 
-		bool save_slice(int dim1, int dim2, int ind, std::string filename) {
+		bool save_policy(int ind, std::string filename) {
 			std::vector<unsigned char> png;
 			lodepng::State state; //optionally customize this one
-			int width = dims[0];
-			int height = dims[1];
-			char image[width * height * 4];
-
-			float max_val = 0.0;
-
-			// for (int y = 0; y < height; ++y) {
-			// 	for (int x = 0; x < width; ++x) {
-			// 		unsigned idx = 4 * y * width + 4 * x;
-			// 		float val = J->at(x,y,ind);
-			// 		if (val < 100 and val > max_val)
-			// 			max_val = val;
-			// 	}
-			// }
-
-			max_val = 120.0;
-
-			for (int y = 0; y < height; ++y) {
-				for (int x = 0; x < width; ++x) {
-					unsigned idx = 4 * y * width + 4 * x;
-					float val = J->at(x,y,ind);
-
-					if (val > 1000) {
-						image[idx + 2] = (char)255;
-						image[idx + 1] = (char)255;
-						image[idx + 0] = (char)255;
-						image[idx + 3] = (char)255;
-					} else {
-						val = 150.0 * val / max_val;
-						image[idx + 2] = (char)val;
-						image[idx + 1] = (char)val;
-						image[idx + 0] = (char)val;
-						image[idx + 3] = (char)255;
-					}
-
-					
-				}
-			}
-			unsigned error = lodepng::encode(png, reinterpret_cast<const unsigned char*> (image), width, height, state);
-			if(!error) lodepng::save_file(png, filename);
-			//if there's an error, display it
-			if(error) std::cout << "encoder error " << error << ": "<< lodepng_error_text(error) << std::endl;
-			return error;
-		}
-
-		bool save_policy(int dim1, int dim2, int ind, std::string filename) {
-			std::vector<unsigned char> png;
-			lodepng::State state; //optionally customize this one
-			int width = dims[0];
-			int height = dims[1];
+			int width = this->dims[0];
+			int height = this->dims[1];
 			char image[width * height * 4];
 
 			float max_val = 0.0;
@@ -482,7 +379,7 @@ namespace dp {
 			for (int y = 0; y < height; ++y) {
 				for (int x = 0; x < width; ++x) {
 					unsigned idx = 4 * y * width + 4 * x;
-					float val = Policy->at(x,y,ind).direction;
+					float val = this->Policy->at(x,y,ind).direction;
 					if (val < 100 and val > max_val)
 						max_val = val;
 				}
@@ -491,7 +388,9 @@ namespace dp {
 			for (int y = 0; y < height; ++y) {
 				for (int x = 0; x < width; ++x) {
 					unsigned idx = 4 * y * width + 4 * x;
-					float val = Policy->at(x,y,ind).direction;
+
+					float val = getPolicyValue(x,y,ind);
+					
 
 					if (val == -1.0) {
 						image[idx + 2] = (char)255;
@@ -504,14 +403,11 @@ namespace dp {
 						} else {
 							val = 150.0 * val / max_val;
 						}
-
 						image[idx + 2] = (char)val;
 						image[idx + 1] = (char)val;
 						image[idx + 0] = (char)val;
 						image[idx + 3] = (char)255;
 					}
-
-					
 				}
 			}
 			unsigned error = lodepng::encode(png, reinterpret_cast<const unsigned char*> (image), width, height, state);
@@ -520,24 +416,81 @@ namespace dp {
 			if(error) std::cout << "encoder error " << error << ": "<< lodepng_error_text(error) << std::endl;
 			return error;
 		}
-	
+
+		bool save_slice(int ind, std::string filename) {
+			int width = dims[0];
+			int height = dims[1];
+			float max_val = 0.0;
+			for (int y = 0; y < height; ++y) {
+				for (int x = 0; x < width; ++x) {
+					float val = J->at(x,y,ind);
+					if (val < 1000 and val > max_val)
+						max_val = val;
+				}
+			}
+			save_slice(ind, max_val, filename);
+		}
+		bool save_slice(int ind, float max_val, std::string filename) {
+			std::vector<unsigned char> png;
+			lodepng::State state; //optionally customize this one
+			int width = dims[0];
+			int height = dims[1];
+			char image[width * height * 4];
+			for (int y = 0; y < height; ++y) {
+				for (int x = 0; x < width; ++x) {
+					unsigned idx = 4 * y * width + 4 * x;
+					float val = J->at(x,y,ind);
+
+					if (val > 1000) {
+						image[idx + 2] = (char)255;
+						image[idx + 1] = (char)255;
+						image[idx + 0] = (char)255;
+						image[idx + 3] = (char)255;
+					} else {
+						val = 175.0 * val / max_val;
+						image[idx + 2] = (char)val;
+						image[idx + 1] = (char)val;
+						image[idx + 0] = (char)val;
+						image[idx + 3] = (char)255;
+					}
+				}
+			}
+			unsigned error = lodepng::encode(png, reinterpret_cast<const unsigned char*> (image), width, height, state);
+			if(!error) lodepng::save_file(png, filename);
+			//if there's an error, display it
+			if(error) std::cout << "encoder error " << error << ": "<< lodepng_error_text(error) << std::endl;
+			return error;
+		}
+
+		// override this function to make save_policy give something interesting
+		virtual float getPolicyValue(int x, int y, int t) { return 0.0; }
+
+		Array3D<state_T>* getJ() { return J; }
+		Array3D<state_T>* getPolicy() { return Policy; }
 	protected:
-
-		int good = 0;
-		int bad = 0;
-
-		Array3D<state_T>* J;
-		Array3D<OmniAction<state_T> >* Policy;
-
-		#if _REPLACE_J == 1
 		Array3D<state_T>* J_prime;
-		#endif
-
-		OmniActionModel<state_T> * action_model;
+		Array3D<state_T>* J;
+		Array3D<action_T >* Policy;
+		
+		action_model_T * action_model;
 		std::vector<int> dims;
 		std::vector<float> min_vals;
 		std::vector<float> max_vals;
 	};
-} 
+
+	template <typename state_T>
+	class OmniValueIterator : public AbstractValueIterator<state_T, OmniAction<state_T>, OmniActionModel<state_T> >
+	{
+	public:
+		OmniValueIterator(std::vector<int> &d, std::vector<float> &min_v, std::vector<float> &max_v) 
+			: AbstractValueIterator<state_T, OmniAction<state_T>, OmniActionModel<state_T> >(d, min_v, max_v) {}
+		
+		float getPolicyValue(int x, int y, int t) {
+			return this->Policy->at(x,y,t).direction;
+		}
+	};
+}
+
+
 
 #endif

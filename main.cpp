@@ -36,6 +36,46 @@ DEFINE_string(test_flag, "hello", "Which LUT slice to output");
 
 using namespace dp;
 
+void omni_action() {
+	std::vector<int> dims = {120,120,20};
+	std::vector<float> min_vals = {0.0,0.0, 0.0};
+	std::vector<float> max_vals = {1.0,1.0, M_2PI};
+
+	// initialize a value iterator
+	// AbstractValueIterator<float, OmniAction<float>, OmniActionModel<float> > *VI 
+	//     = new AbstractValueIterator<float, OmniAction<float>, OmniActionModel<float> >(dims, min_vals, max_vals);
+	OmniValueIterator<float> *VI 
+	    = new OmniValueIterator<float>(dims, min_vals, max_vals);
+
+	OmniActionModel<float> *ActionModel = new OmniActionModel<float>(2.0, 3);
+	VI->set_action_model(ActionModel);
+
+	// set the desired states to zero cost
+    for (int x = dims[0]/2-2; x < dims[0]/2+3; ++x)
+		for (int y = dims[1]/2-2; y < dims[1]/2+3; ++y)
+			for (int t = 0; t < dims[2]; ++t)
+				VI->getJ()->at(x,y,t) = 0.0;
+
+	int steps = 100;
+
+	auto start_time = std::chrono::high_resolution_clock::now();
+	// policy iteration
+	for (int i = 0; i < steps; ++i)
+	{
+		std::cout << "Step: " << i << std::endl;
+		VI->step();
+
+		VI->save_slice(0, 120.0, "./sequence/" + padded(i,3) + ".png");
+		VI->save_policy(0,"./policy_sequence/" + padded(i,3) + ".png");
+	}
+
+	// auto end_time = std::chrono::high_resolution_clock::now();
+	// std::chrono::duration<double> time_span = std::chrono::duration_cast<std::chrono::duration<double>>(end_time - start_time);
+	// std::cout << "Done in: " << time_span.count() << std::endl;
+	// std::cout << "  - per step: " << time_span.count() / steps << std::endl;
+	
+}
+
 int main(int argc, char *argv[])
 {
 	// set usage message
@@ -47,7 +87,9 @@ int main(int argc, char *argv[])
 
 	std::cout << "start." << std::endl;
 
-	ValueIterator<float> vi = ValueIterator<float>();
+	// ValueIterator<float> vi = ValueIterator<float>();
+
+	omni_action();
 
 	std::cout << FLAGS_test_flag << std::endl;
 
