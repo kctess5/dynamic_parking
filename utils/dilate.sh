@@ -1,0 +1,1 @@
+python dilate.py --map ../maps/small_kitchen.png --out_path ../maps/dilated_kitchen/dilated_kitchen --discretization 16 --cell_size 0.024 -s --padding 0.00

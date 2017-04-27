@@ -146,87 +146,82 @@ void nonholonomic_action() {
 template <typename T>
 void nonholonomic_action2() {
 	// nonholonomic motion model with extended state space
-	std::vector<int> dims = {160,160,40};
+	std::vector<int> dims = {210,210,60};
 	std::vector<float> min_vals = {0.0,0.0, 0.0};
 	std::vector<float> max_vals = {1.0,1.0, M_2PI};
 
 	NonHolonomicIteratorLargeSpace<T> *VI 
 	    = new NonHolonomicIteratorLargeSpace<T>(dims, min_vals, max_vals);
 
-	NonHolonomicModel<T> *ActionModel = new NonHolonomicModel<T>(4.0, 6, 0.35, 1.0);
+	NonHolonomicModel<T> *ActionModel = new NonHolonomicModel<T>(2.0, 8, 0.32, 10.4);
+    // NonHolonomicModel<T> *ActionModel = new NonHolonomicModel<T>(2.0, 8, 0.32, 4.0);
 	// this part is necessary for the fast apply statement
 	ActionModel->memoize(dims[2]);
-	VI->load_map("../70x70_map.png");
-
+	// VI->load_map("../70x70_map.png");
+	
+	// goal info
+	VI->load_map("../maps/210x210_kitchen2.png");
+	
+	// 3d occupancy obstacle info
+	VI->load_3D_omap("../maps/dilated_kitchen/dilated_kitchen_summary.yaml");
 	// return;
 
+	// VI->load_map("../kitchen_2.png");
+	// VI->load_map("../160x160_parallel2.png");
+
+	// return;
+// 
 	// std::vector<NonHolonomicAction<T> > actions = ActionModel->enumerate();
 	// for (int i = 0; i < actions.size(); ++i)
 	// 	std::cout << actions[i].steering_angle << " " << actions[i].throttle << std::endl;
 
 	VI->set_action_model(ActionModel);
 
-	// T a1, b1, c1;
-	// for (int i = 0; i < actions.size(); ++i)
-	// {
-	// 	std::cout << "\naction: " << actions[i].steering_angle << "  " << actions[i].throttle << std::endl;
-		
-	// 	ActionModel->apply(actions[i], 0.0, 0.0, 0.0, a1, b1, c1);
-	// 	std::cout << "norm: " << a1 << " " << b1 << " " << c1 << std::endl;
-	// 	ActionModel->applyFast(actions[i], 0.0, 0.0, 0.0, a1, b1, c1);
-	// 	std::cout << "fast: " << a1 << " " << b1 << " " << c1 << std::endl;
-	// }
+	// std::cout << "blah: " << VI->is_goal(40, 35, 39) << std::endl;
 
-	// NonHolonomicAction<T> a = NonHolonomicAction<T>(0.35, 1.0);
+	// std::cout << "blah1: " << VI->within_err(41, M_2PI / 2.0, 0.15) << std::endl;
 
-	
-	// ActionModel->apply(a, 0.0, 0.0, 0.0, a1, b1, c1);
-	// std::cout << a1 << " " << b1 << " " << c1 << std::endl;
-	// ActionModel->applyFast(a, 0.0, 0.0, 0.0, a1, b1, c1);
-	// std::cout << a1 << " " << b1 << " " << c1 << std::endl;
-
-
-	// a = NonHolonomicAction<T>(1.0, -1.0);
-
-	// ActionModel->applyFast(a, 0.0, 0.0, 0.0, a1, b1, c1);
-	// std::cout << "t " << a1 << " " << b1 << " " << c1 << std::endl;
-
+	// std::cout << "blah1: " << VI->within_err(30, M_2PI / 2.0, 0.15) << std::endl;
+	// std::cout << "blah2: " << VI->within_err(39, M_2PI / 2.0, 0.15) << std::endl;
+	// std::cout << "blah3: " << VI->within_err(40, M_2PI / 2.0, 0.15) << std::endl;
+	// std::cout << "blah4: " << VI->within_err(0, M_2PI, 0.15) << std::endl;
+	// std::cout << "blah5: " << VI->within_err(1, M_2PI, 0.15) << std::endl;
+	// std::cout << "blah6: " << VI->within_err(79, M_2PI, 0.15) << std::endl;
 	// return;
 
-	// set the desired states to zero cost
-  //   for (int x = dims[0]/2-2; x < dims[0]/2+3; ++x)
-		// for (int y = dims[1]/2-2; y < dims[1]/2+3; ++y)
-		// 	for (int t = 0; t < dims[2]; ++t)
-		// 		VI->getJ()->at(x,y,t) = 0.0;
-
-	// float max_theta_err = 0.15;
-	// // parallel park
-	// for (int x = dims[0]/2-8; x < dims[0]/2+8; ++x)
-	// 	for (int y = dims[1]/2-2; y < dims[1]/2+3; ++y)
-	// 		for (int t = 0; t < dims[2]; ++t) {
-	// 			float theta = M_2PI * (float)t / (float)dims[2];
-	// 			if (theta <= max_theta_err || M_2PI - theta <= max_theta_err)
-	// 				VI->getJ()->at(x,y,t) = 0.0;
-				
-	// 		}
-				
-
-	int steps = 100;
+	int steps = -1;
+	// int steps = 40;
 	int slice = 0;
-	float max_cost = 100.0;
+	float max_cost = 200.0;
 
-	VI->save_slice(slice, max_cost, "./sequence/" + padded(0,3) + ".png");
+	VI->save_slice(slice, max_cost, "./sequence/" + padded(0,4) + ".png");
 
 	auto start_time = std::chrono::high_resolution_clock::now();
-	// policy iteration
-	for (int i = 0; i < steps; ++i)
-	{
-		std::cout << "Step: " << i << std::endl;
-		VI->step();
 
-		VI->save_slice(slice, max_cost, "./sequence/" + padded(i+1,3) + ".png");
-		VI->save_policy(slice,"./policy_sequence/" + padded(i+1,3) + ".png");
+	if (steps < 0) {
+		int i = 0;
+		bool useful_update = true;
+		while (useful_update) {
+			std::cout << "Step: " << i << std::endl;
+			VI->step();
+			VI->save_slice(slice, max_cost, "./sequence/" + padded(i+1,4) + ".png");
+			VI->save_policy(slice,"./policy_sequence/" + padded(i+1,4) + ".png");
+			i++;
+
+			useful_update = VI->last_step_useful();
+		}
+	} else {
+		// policy iteration
+		for (int i = 0; i < steps; ++i)
+		{
+			std::cout << "Step: " << i << std::endl;
+			VI->step();
+
+			VI->save_slice(slice, max_cost, "./sequence/" + padded(i+1,4) + ".png");
+			VI->save_policy(slice,"./policy_sequence/" + padded(i+1,4) + ".png");
+		}
 	}
+	
 
 	// VI->getJ()->printSlice(5,3);
 
@@ -236,10 +231,12 @@ void nonholonomic_action2() {
 		VI->save_policy(i,"./policy_slices/" + padded(i,3) + ".png");
 	}
 
+	VI->save_full_policy("./serialized/parallel_park");
+
 	// serialize policy and cost function to the file system for analysis elsewhere
 	VI->serialize_cost("./serialized/cost.object");
-	VI->serialize_policy("./serialized/policy.object");
-	VI->serialize_policy2("./serialized/policy_reverse.object");
+	// VI->serialize_policy("./serialized/policy.object");
+	// VI->serialize_policy2("./serialized/policy_reverse.object");
 
 	auto end_time = std::chrono::high_resolution_clock::now();
 	std::chrono::duration<double> time_span = std::chrono::duration_cast<std::chrono::duration<double>>(end_time - start_time);

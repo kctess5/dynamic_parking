@@ -20,6 +20,8 @@
 #include "vendor/lodepng/lodepng.h"
 #include "vendor/distance_transform.h"
 
+
+// #include <stdlib.h>
 #include <stdio.h>      /* printf */
 #include <cstdlib>
 #include <vector>
@@ -40,13 +42,14 @@
 #include <bitset>
 #include <limits>
 
-#define _EPSILON 0.0000001
+#define _EPSILON 0.0001
 #define M_2PI 6.2831853071795864769252867665590
 
 #define MAX_COST 100000
-#define DISCOUNT 1.05
+#define DISCOUNT 1.0
 #define CHANGE_PENALTY 0.05
-#define REVERSAL_PENALTY 1.0
+#define REVERSAL_PENALTY 3.0
+#define DEFLECTION_PENALTY 0.5
 
 #define _USE_INTERPOLATION 1
 #define _INTERP_AVOID_MEMREADS 1
@@ -80,6 +83,19 @@ std::string padded(int val, int num_zeros) {
 }
 
 namespace dp {
+	// You could also take an existing vector as a parameter.
+	std::vector<std::string> split(std::string str, char delimiter) {
+	  std::vector<std::string> internal;
+	  std::stringstream ss(str); // Turn the string into a stream.
+	  std::string tok;
+	  
+	  while(getline(ss, tok, delimiter)) {
+	    internal.push_back(tok);
+	  }
+	  
+	  return internal;
+	}
+
 	float rgb2gray(float r, float g, float b) {
 		return 0.229 * r + 0.587 * g + 0.114 * b;
 	}
@@ -482,6 +498,7 @@ namespace dp {
 		OmniAction() : direction(-1.0), stop(true) {}
 		OmniAction(T val) : stop(false) { direction = fmod(val, M_2PI);}
 		std::string to_string() {return "{dir:"<<direction<<",stop:"<<stop<<"}"; } 
+		std::string to_string2() {return direction<<" "<<stop; } 
 	};
 
 	template <typename T>
@@ -543,6 +560,12 @@ namespace dp {
 			std::stringstream ss;
 			// ss << "1";
 			ss<<"{\"a\":"<<steering_angle<<",\"t\":"<<throttle<<"}";
+			return ss.str();
+		} 
+		std::string to_string2() {
+			std::stringstream ss;
+			// ss << "1";
+			ss<<steering_angle<<" "<<throttle;
 			return ss.str();
 		} 
 	};
@@ -701,8 +724,13 @@ namespace dp {
 			// if (action.throttle == 0) return 0.1;
 			if (action.throttle == 0) return 0.0;
 			if (action.steering_angle == 0) return step_size;
-			return step_size + CHANGE_PENALTY; 
+
+			return step_size + DEFLECTION_PENALTY * step_size * fabs(action.steering_angle) / max_steer;
+
+			// return step_size;// + CHANGE_PENALTY; 
 		}
+
+		T max_affect_distance() { return step_size + 0.5; }
 	
 	private:
 		T step_size;
@@ -882,7 +910,7 @@ namespace dp {
 		}
 
 		bool serialize_cost(std::string filename) {
-			std::cout << "serializing to file system" << std::endl;
+			std::cout << "serializing cost to file system" << std::endl;
 			std::stringstream serialized;
 
 			serialized << "{\"cost\": {" << std::endl;
@@ -1068,17 +1096,166 @@ namespace dp {
 				#endif
 			}
 
-		bool is_goal(int x, int y, int z) {
-			return this->GoalMap->at(x, y, 0) == 1;
+		bool load_3D_omap(std::string summary) {
+
+			std::ifstream summary_file(summary);
+			std::string line;
+
+			int discretization = 0;
+			std::vector<std::string> files;
+			if (summary_file.is_open()) {
+				int num_left = 0;
+				bool collecting_file_list = false;
+				while ( getline (summary_file,line) ) {
+
+					// parse out the discretization
+					if (line.find("discretization:") != std::string::npos) discretization = std::stoi(split(line, ':')[1]);
+					
+					if (line.find("files") != std::string::npos) {
+						collecting_file_list = discretization > 0;
+						num_left = discretization;
+						continue;
+					} 
+
+					if (collecting_file_list) {
+						files.push_back(split(line, '-')[1]);
+						num_left -= 1;
+						if (num_left == 0) collecting_file_list = false;
+					}
+				}
+				summary_file.close();
+			} else {
+				std::cout << "Unable to open file" << std::endl;
+				return false;
+			} 
+
+			if (discretization <= 0) {
+				std::cout << "Relevant data not found in file." << std::endl;
+				return false;
+			}
+
+			// this->ObstacleMap = new Array3D<bool>();
+			std::string filename;
+			std::cout << "Loading " << discretization << " slices of occupancy map" << std::endl;
+			for (int i = 0; i < files.size(); ++i)
+			{
+				filename = files[i];
+				std::cout << " - Loading: " << files[i] << std::endl;
+
+				unsigned error;
+				unsigned char* image;
+
+				unsigned int width, height;
+
+				error = lodepng_decode32_file(&image, &width, &height, filename.c_str());
+				if(error) {
+					printf("ERROR %u: %s\n", error, lodepng_error_text(error));
+					return false;
+				}
+
+				if (i == 0) {
+					std::cout << " - Allocating space in the ObstacleMap: " << width << " * " << height << " * " << discretization << std::endl;
+					this->ObstacleMap = new Array3D<bool>(width, height, discretization);
+				}
+
+				for (int y = 0; y < height; ++y) {
+					for (int x = 0; x < width; ++x) {
+						unsigned idx = 4 * y * width + 4 * x;
+						int r = image[idx + 2];
+						int g = image[idx + 1];
+						int b = image[idx + 0];
+
+						if (r == 0 && g == 0 && b == 0)
+							this->ObstacleMap->at(x, y, i) = 1;
+						else
+							this->ObstacleMap->at(x, y, i) = 0;
+					}
+				}
+			}
 		}
 
-		bool is_obstacle(int x, int y) {
-			return this->ObstacleMap->at(x, y, 0) == 1;
+		// save all information necessary to execute the policy
+		//   - raw files containing forwards and backwards policies
+		//   - metadata file
+		void save_full_policy(std::string path) {
+			std::cout << "Serializing full policy to: " << path << std::endl;
+			std::stringstream policy1;
+			std::stringstream policy2;
+			std::stringstream summary;
+
+			char *full_path = realpath(path.c_str(), NULL);
+
+			summary << "{\"policy\": {" << std::endl;
+			summary << T1 << "\"d0\": " << J2->d0 << "," << std::endl;
+			summary << T1 << "\"d1\": " << J2->d1 << "," << std::endl;
+			summary << T1 << "\"d2\": " << J2->d2 << "," << std::endl;
+			summary << T1 << "\"forwards_policy\": \"" << full_path << "/policy_forwards.object\"," << std::endl;
+			summary << T1 << "\"backwards_policy\": \"" << full_path << "/policy_backwards.object\"" << std::endl;
+			summary << "}}" << std::endl;
+
+
+			for (int i = 0; i < J2->d0 * J2->d1 * J2->d2; ++i)
+			{
+				policy1 << this->Policy->pool[i].to_string2() << "\n"; 
+				policy2 << Policy2->pool[i].to_string2() << "\n"; 
+			}
+
+			std::ofstream file;  
+			file.open(path + "/summary.json");
+			file << summary.str();
+			file.close();
+
+			std::ofstream file2;  
+			file2.open(path + "/policy_forwards.object");
+			file2 << policy1.str();
+			file2.close();
+
+			std::ofstream file3;  
+			file3.open(path + "/policy_backwards.object");
+			file3 << policy2.str();
+			file3.close();
+
+			free(full_path);
 		}
+
+		bool within_err(int z, float target, float err) {
+			float diff = M_2PI * (float) z / (float)this->dims[2] - target;
+			while (diff < 0) diff += M_2PI;
+			return diff <= err || M_2PI - diff <= err;
+		}
+
+		bool is_goal(int x, int y, int z) {
+			if (x >= this->GoalMap->d0 || y >= this->GoalMap->d1) return false;
+			float max_theta_err = 0.16;
+			return this->GoalMap->at(x, y, 0) == 1 && (within_err(z, 0.0, max_theta_err) || within_err(z, 3.1415, max_theta_err));
+		}
+
+		bool is_obstacle(state_T x, state_T y, state_T z) {
+			int px = round(x);
+			int py = round(y);
+			if (px >= this->ObstacleMap->d0 || py >= this->ObstacleMap->d1) return false;
+
+			// std::cout << x << "  " << y << "  " << round(x) << "  " <<  round(y) << std::endl;
+			if (this->ObstacleMap->d2 > 1) {
+				state_T theta = RESCALE_T(z, this->dims[2]);
+				int omap_slice = round(UNSCALE_T(theta, this->ObstacleMap->d2));
+				omap_slice = positive_modulo(omap_slice, this->ObstacleMap->d2);
+				return this->ObstacleMap->at(round(x), round(y), omap_slice) == 1;
+			} else {
+				return this->ObstacleMap->at(px, py, 0) == 1;
+			}
+		}
+		// bool is_obstacle(int x, int y) {
+		// 	int px = round(x);
+		// 	int py = round(y);
+		// 	if (x >= this->ObstacleMap->d0 || y >= this->ObstacleMap->d1) return false;
+		// 	return this->ObstacleMap->at(px, py, 0) == 1;
+		// }
 
 
 		state_T cost_at2(state_T x, state_T y, state_T z) {
-			if (x < 0 || x > this->dims[0] - 1 || y < 0 || y > this->dims[1] - 1 || is_obstacle(x,y)) {
+			if (x < 0 || x > this->dims[0] - 1 || y < 0 || y > this->dims[1] - 1 || is_obstacle(x,y,z)) {
+			// if (x < 0 || x > this->dims[0] - 1 || y < 0 || y > this->dims[1] - 1 || is_obstacle(x,y)) {
 				// out of bounds cost
 				return MAX_COST * 2.0;
 			} else {
@@ -1087,7 +1264,8 @@ namespace dp {
 		}
 
 		state_T cost_at(state_T x, state_T y, state_T z) {
-			if (x < 0 || x > this->dims[0] - 1 || y < 0 || y > this->dims[1] - 1 || is_obstacle(x,y)) {
+			if (x < 0 || x > this->dims[0] - 1 || y < 0 || y > this->dims[1] - 1 || is_obstacle(x,y,z)) {
+			// if (x < 0 || x > this->dims[0] - 1 || y < 0 || y > this->dims[1] - 1 || is_obstacle(x,y)) {
 				// out of bounds cost
 				return MAX_COST * 2.0;
 			} else {
@@ -1145,17 +1323,22 @@ namespace dp {
 
 			#if _USE_HEURISTIC_PRUNING == 1
 			// clear binary usefulness buffer
+			usefulMap->fill(false);
 			#endif
 
-			usefulMap->fill(false);
+			
 
 			// good = 0;
 			// bad = 0;
 
+			was_useful = false;
+
 			// if (debug && y > 8 && y < 12) std::cout << "HELLO" << std::endl;
 			for (x = 0; x < this->dims[0]; ++x) {
 				for (y = 0; y < this->dims[1]; ++y) {
-					if (usefulDist->grid[x][y] > 4.5) continue;
+					#if _USE_HEURISTIC_PRUNING == 1
+					if (usefulDist->grid[x][y] > this->action_model->max_affect_distance()) continue;
+					#endif
 
 					for (z = 0; z < this->dims[2]; ++z) {
 						if (this->is_goal(x,y,z)) {
@@ -1167,8 +1350,11 @@ namespace dp {
 							this->J2_prime->at(x,y,z) = this->terminal_cost(x,y,z);
 
 							if (iter == 0) {
+								#if _USE_HEURISTIC_PRUNING == 1
 								usefulMap->grid[x][y] = true;
+								#endif
 								good ++;
+								was_useful = true;
 							} else {
 								bad ++;
 							}
@@ -1211,10 +1397,13 @@ namespace dp {
 							this->Policy->at(x,y,z) = actions[min_i];
 							this->J_prime->at(x,y,z) = min_cost;
 
-							if (x == 39 && y == 34) std::cout << "SHOULD NEVER HAPPEN" << std::endl;
+							// if (x == 39 && y == 34) std::cout << "SHOULD NEVER HAPPEN" << std::endl;
 
 							if (useful_update(this->J->at(x,y,z), min_cost)) {
+								#if _USE_HEURISTIC_PRUNING == 1
 								usefulMap->grid[x][y] = true;
+								#endif
+								was_useful = true;
 								good ++;
 							} else {
 								bad ++;
@@ -1259,7 +1448,10 @@ namespace dp {
 							this->J2_prime->at(x,y,z) = min_cost;
 
 							if (useful_update(this->J2->at(x,y,z), min_cost)) {
+								#if _USE_HEURISTIC_PRUNING == 1
 								usefulMap->grid[x][y] = true;
+								#endif
+								was_useful = true;
 								good ++;
 							} else {
 								bad ++;
@@ -1270,17 +1462,19 @@ namespace dp {
 			}
 
 			iter ++;
-			// usefulMap->save("./useful_sequence/" + padded(iter,3) + ".png");
 
+			#if _USE_HEURISTIC_PRUNING == 1
 			usefulDist->init(usefulMap);
 			usefulMap->save("./useful_sequence/" + padded(iter,3) + ".png");
-			// usefulDist->save("./useful_sequence/d" + padded(iter,3) + ".png");
+			#endif
 
 			this->J->replace(this->J_prime);
 			this->J2->replace(this->J2_prime);
 
-			std::cout << "g: " << good  << "  b: " << bad << std::endl;
+			std::cout << "    g: " << good  << "  b: " << bad << std::endl;
 		}
+
+		bool last_step_useful() { return was_useful; }
 
 	protected:
 		Array3D<state_T>* J2_prime;
@@ -1295,6 +1489,9 @@ namespace dp {
 		int good = 0;
 		int bad = 0;
 		int iter = 0;
+
+		// whether or not the last step was useful
+		bool was_useful = true;
 	};
 }
 
