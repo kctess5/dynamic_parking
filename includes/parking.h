@@ -48,8 +48,8 @@
 #define MAX_COST 100000
 #define DISCOUNT 1.0
 #define CHANGE_PENALTY 0.05
-#define REVERSAL_PENALTY 3.0
-#define DEFLECTION_PENALTY 0.5
+#define REVERSAL_PENALTY 60.0
+#define DEFLECTION_PENALTY 0.0
 
 #define _USE_INTERPOLATION 1
 #define _INTERP_AVOID_MEMREADS 1
@@ -1226,8 +1226,11 @@ namespace dp {
 
 		bool is_goal(int x, int y, int z) {
 			if (x >= this->GoalMap->d0 || y >= this->GoalMap->d1) return false;
-			float max_theta_err = 0.16;
+			float max_theta_err = 0.25;
 			return this->GoalMap->at(x, y, 0) == 1 && (within_err(z, 0.0, max_theta_err) || within_err(z, 3.1415, max_theta_err));
+
+			// return this->GoalMap->at(x, y, 0) == 1 && within_err(z, 0.0, max_theta_err);
+			// return this->GoalMap->at(x, y, 0) == 1 && within_err(z, 3.1415, max_theta_err);
 		}
 
 		bool is_obstacle(state_T x, state_T y, state_T z) {

@@ -11,6 +11,106 @@ Action = namedtuple('Action', ['steering_angle', 'throttle'])
 def make_arrow(state, length=1.75):
 	return [state.x, state.y, np.cos(state.theta)*length, np.sin(state.theta)*length]
 
+class MotionModel(object):
+ 	""" Base class for describing car dynamics """
+ 	def __init__(self):
+ 		pass
+ 	
+ 	def apply(self, action, state, step):
+ 		raise NotImplementedError("Must be defined by child class")
+
+ 	def make_curves(self, state, action, step, disc, scale_step=False):
+ 		xs = []
+		ys = []
+		xs.append(state.x)
+		ys.append(state.y)
+		steps = np.linspace(step,0.0,disc,endpoint=False)[::-1]
+		for i in steps:
+			new_state = self.apply(action, state, i, scale_step=scale_step)
+			xs.append(new_state.x)
+			ys.append(new_state.y)
+		return xs, ys
+
+class EmpericalModel(MotionModel):
+ 	""" Emperical model based off measured car data """
+ 	def __init__(self, world_scale=1.0):
+ 		self.max_steer = 0.335
+ 		self.L = 0.23
+ 		self.ackerman_transition = [0.095, 0.105]
+ 		self.polynomial_coeffs = [-4.035, 5.153, -0.018]
+ 		self.poly = lambda a: 1.0 / (a*a*self.polynomial_coeffs[0] + a*self.polynomial_coeffs[1] + self.polynomial_coeffs[2])
+
+ 		self._EPSILON = 0.0000001
+ 		self._SCALE = world_scale
+
+ 	# only accepts positive, nonzero steering angles
+ 	def steering_arc_radius(self, angle):
+ 		unscaled_radius = 0.0
+ 		if angle <= self.ackerman_transition[0]:
+ 			unscaled_radius = self.L / np.tan(angle)
+ 		elif angle >= self.ackerman_transition[1]:
+ 			unscaled_radius = self.poly(min(angle, self.max_steer))
+ 		else:
+ 			width = self.ackerman_transition[1] - self.ackerman_transition[0]
+ 			t = (angle - self.ackerman_transition[0]) / width
+ 			ackL  = self.L / np.tan(angle)
+ 			polyL = self.poly(angle)
+ 			unscaled_radius = (1.0 - t) * ackL + t * polyL
+
+ 		if unscaled_radius == 0.0:
+	 		print "THIS SHOULD NOT HAPPEN"
+ 		return unscaled_radius * self._SCALE
+
+ 	def apply(self, action, state, step, scale_step=False):
+ 		if scale_step:
+ 			step *= self._SCALE
+
+ 		if abs(action.steering_angle) < self._EPSILON:
+ 			dt = 0
+ 			dy = 0
+ 			dx = action.throttle * step
+ 		else:
+ 			sign = np.sign(action.steering_angle)
+ 			R = self.steering_arc_radius(abs(action.steering_angle))
+ 			dt = sign * action.throttle * step / R
+			dy = sign * (1.0-np.cos(dt))*R
+			dx = np.sin(dt)*R
+
+ 		c, s = np.cos(state.theta), np.sin(state.theta)
+		dx_global = c*dx - s*dy
+		dy_global = s*dx + c*dy
+
+		return State(dx_global + state.x, dy_global + state.y, (dt + state.theta)%(2.0*np.pi))
+
+class AckermannModel(MotionModel):
+ 	""" Standard kinematic bicycle motion model """
+ 	def __init__(self, world_scale=1.0):
+ 		self._EPSILON = 0.0000001
+ 		self._SCALE = world_scale
+
+ 		self.L = 0.23
+ 		self.L *= world_scale
+
+ 	def apply(self, action, state, step, scale_step=False):
+ 		if scale_step:
+ 			step *= self._SCALE
+
+ 		if abs(action.steering_angle) < self._EPSILON:
+ 			dt = 0
+ 			dy = 0
+ 			dx = action.throttle * step
+ 		else:
+ 			tanangle = np.tan(action.steering_angle)
+ 			dt = action.throttle * step * tanangle / self.L
+			dy = (1.0-np.cos(dt))*self.L / tanangle
+			dx = self.L * np.sin(dt) / tanangle
+
+ 		c, s = np.cos(state.theta), np.sin(state.theta)
+		dx_global = c*dx - s*dy
+		dy_global = s*dx + c*dy
+
+		return State(dx_global + state.x, dy_global + state.y, (dt + state.theta)%(2.0*np.pi))
+
 def make_curves(state, action, step, disc):
 	xs = []
 	ys = []
@@ -23,7 +123,7 @@ def make_curves(state, action, step, disc):
 		ys.append(new_state.y)
 	return xs, ys
 
-wheelbase = 10.4
+wheelbase = 4.7619
 STEP = 2.0
 
 def unscale_t(t,disc):
@@ -172,6 +272,10 @@ class SimulatorExtendedState(object):
 			optimal_control = self.Policy.at(start_state, interpolate=interpolate)
 			new_state = self.transition(start_state, optimal_control)
 
+		if not optimal_control.throttle == self.last_throttle:
+			print "REVERSAL"
+			self.last_throttle = optimal_control.throttle
+
 		if give_action:
 			return new_state, optimal_control
 		else:
@@ -205,6 +309,7 @@ class SimulatorExtendedState(object):
 		self.do_the_thing(State(start_x, start_y, unscale_t(angle, self.Policy.d2)))
 		
 	def do_the_thing(self, state):
+		self.last_throttle = 1
 		start = ExtendedState(state.x,state.y,state.theta, 1)
 		end, state_hist, action_hist = self.n_simulation_steps(200,start, make_history_array=True)
 		# print state_hist
@@ -283,17 +388,57 @@ class SimulatorExtendedState(object):
 		self.ax.set_ylim([0, self.Policy.d1])
 		plt.show()
 
+# if __name__ == '__main__':
+# 	t = time.time()
+# 	# policy = NHPolicy2("./build/serialized/parallel_park")
+# 	policy = NHPolicy2("./build/serialized/parallel_park_basement_left")
+# 	print "Loaded in:", time.time() - t
+
+# 	s = ExtendedState(0,0,0,0)
+# 	print policy.at(s)
+# 	sim = SimulatorExtendedState(policy)
+
+# 	# sim.load_image("70x70_map.png")
+# 	# sim.load_image("./maps/210x210_kitchen.png")
+# 	sim.load_image("./maps/parking_goal_map_left.png")
+# 	# sim.load_image("160x160_parallel2.png")
+# 	sim.interactive_plot()
+# 	print "DONE"
+
 if __name__ == '__main__':
-	t = time.time()
-	policy = NHPolicy2("./build/serialized/parallel_park")
-	print "Loaded in:", time.time() - t
+	world_scale = 1.0
+	max_angle = 0.35
+	disc = 19
+	steering_angles = np.linspace(max_angle, -max_angle, num=disc)
+	speeds = [-1, 1]
+	actions = []
 
-	s = ExtendedState(0,0,0,0)
-	print policy.at(s)
-	sim = SimulatorExtendedState(policy)
+	emp = EmpericalModel(world_scale=world_scale)
+	ack = AckermannModel(world_scale=world_scale)
 
-	# sim.load_image("70x70_map.png")
-	sim.load_image("./maps/210x210_kitchen.png")
-	# sim.load_image("160x160_parallel2.png")
-	sim.interactive_plot()
-	print "DONE"
+	# sa = np.linspace(0.05, 0.15, num=18)
+	# for a in sa:
+	# 	print a, "-->", model.steering_arc_radius(a)
+
+	for a in steering_angles:
+		actions.append(Action(a, speeds[0]))
+		actions.append(Action(a, speeds[1]))
+
+	state1 = State(-1.25,0,np.pi/2.0)
+	state2 = State(1.25,0,np.pi/2.0)
+
+	step = 1.75
+
+	for a in actions:
+		print a
+
+		lx, ly = ack.make_curves(state1, a, step, 10, scale_step=True)
+		plt.plot(lx, ly, color="red")
+
+		lx, ly = emp.make_curves(state2, a, step, 10, scale_step=True)
+		plt.plot(lx, ly, color="black")
+
+	mv = 2.0 * world_scale
+	plt.xlim([-1.5*mv, 1.5*mv])
+	plt.ylim([-mv, mv])
+	plt.show()

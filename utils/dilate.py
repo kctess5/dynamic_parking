@@ -55,8 +55,10 @@ class Car(object):
 		corners -= padding / 2.0
 
 		# rotation matrix
-		R = np.array([[np.cos(-theta), -np.sin(-theta)],
-                  	 [np.sin(-theta), np.cos(-theta)]])
+		# R = np.array([[np.cos(-theta), -np.sin(-theta)],
+  #                 	 [np.sin(-theta), np.cos(-theta)]])
+		R = np.array([[np.cos(theta), -np.sin(theta)],
+                  	 [np.sin(theta), np.cos(theta)]])
 
 		corners = np.dot(R, corners.T).T
 		bounds = np.ceil(np.max(np.abs(corners), axis=0)).astype(int)

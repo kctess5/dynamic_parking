@@ -1,0 +1,27 @@
+discretization: 24
+map: /home/corey/mit/6.231/final_project/discrete_parking/maps/small_kitchen.png
+files: 
+    -/home/corey/mit/6.231/final_project/discrete_parking/maps/dilated_kitchen_inv/dilated_kitchen_1_of_24.png
+    -/home/corey/mit/6.231/final_project/discrete_parking/maps/dilated_kitchen_inv/dilated_kitchen_2_of_24.png
+    -/home/corey/mit/6.231/final_project/discrete_parking/maps/dilated_kitchen_inv/dilated_kitchen_3_of_24.png
+    -/home/corey/mit/6.231/final_project/discrete_parking/maps/dilated_kitchen_inv/dilated_kitchen_4_of_24.png
+    -/home/corey/mit/6.231/final_project/discrete_parking/maps/dilated_kitchen_inv/dilated_kitchen_5_of_24.png
+    -/home/corey/mit/6.231/final_project/discrete_parking/maps/dilated_kitchen_inv/dilated_kitchen_6_of_24.png
+    -/home/corey/mit/6.231/final_project/discrete_parking/maps/dilated_kitchen_inv/dilated_kitchen_7_of_24.png
+    -/home/corey/mit/6.231/final_project/discrete_parking/maps/dilated_kitchen_inv/dilated_kitchen_8_of_24.png
+    -/home/corey/mit/6.231/final_project/discrete_parking/maps/dilated_kitchen_inv/dilated_kitchen_9_of_24.png
+    -/home/corey/mit/6.231/final_project/discrete_parking/maps/dilated_kitchen_inv/dilated_kitchen_10_of_24.png
+    -/home/corey/mit/6.231/final_project/discrete_parking/maps/dilated_kitchen_inv/dilated_kitchen_11_of_24.png
+    -/home/corey/mit/6.231/final_project/discrete_parking/maps/dilated_kitchen_inv/dilated_kitchen_12_of_24.png
+    -/home/corey/mit/6.231/final_project/discrete_parking/maps/dilated_kitchen_inv/dilated_kitchen_13_of_24.png
+    -/home/corey/mit/6.231/final_project/discrete_parking/maps/dilated_kitchen_inv/dilated_kitchen_14_of_24.png
+    -/home/corey/mit/6.231/final_project/discrete_parking/maps/dilated_kitchen_inv/dilated_kitchen_15_of_24.png
+    -/home/corey/mit/6.231/final_project/discrete_parking/maps/dilated_kitchen_inv/dilated_kitchen_16_of_24.png
+    -/home/corey/mit/6.231/final_project/discrete_parking/maps/dilated_kitchen_inv/dilated_kitchen_17_of_24.png
+    -/home/corey/mit/6.231/final_project/discrete_parking/maps/dilated_kitchen_inv/dilated_kitchen_18_of_24.png
+    -/home/corey/mit/6.231/final_project/discrete_parking/maps/dilated_kitchen_inv/dilated_kitchen_19_of_24.png
+    -/home/corey/mit/6.231/final_project/discrete_parking/maps/dilated_kitchen_inv/dilated_kitchen_20_of_24.png
+    -/home/corey/mit/6.231/final_project/discrete_parking/maps/dilated_kitchen_inv/dilated_kitchen_21_of_24.png
+    -/home/corey/mit/6.231/final_project/discrete_parking/maps/dilated_kitchen_inv/dilated_kitchen_22_of_24.png
+    -/home/corey/mit/6.231/final_project/discrete_parking/maps/dilated_kitchen_inv/dilated_kitchen_23_of_24.png
+    -/home/corey/mit/6.231/final_project/discrete_parking/maps/dilated_kitchen_inv/dilated_kitchen_24_of_24.png

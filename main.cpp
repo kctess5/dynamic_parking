@@ -146,24 +146,33 @@ void nonholonomic_action() {
 template <typename T>
 void nonholonomic_action2() {
 	// nonholonomic motion model with extended state space
-	std::vector<int> dims = {210,210,60};
+	std::vector<int> dims = {133,133,40};
 	std::vector<float> min_vals = {0.0,0.0, 0.0};
 	std::vector<float> max_vals = {1.0,1.0, M_2PI};
 
 	NonHolonomicIteratorLargeSpace<T> *VI 
 	    = new NonHolonomicIteratorLargeSpace<T>(dims, min_vals, max_vals);
 
-	NonHolonomicModel<T> *ActionModel = new NonHolonomicModel<T>(2.0, 8, 0.32, 10.4);
+	
+	NonHolonomicModel<T> *ActionModel = new NonHolonomicModel<T>(2.0, 8, 0.365, 4.7619);
+
+	// NonHolonomicModel<T> *ActionModel = new NonHolonomicModel<T>(2.0, 6, 0.3, 11.4);
     // NonHolonomicModel<T> *ActionModel = new NonHolonomicModel<T>(2.0, 8, 0.32, 4.0);
 	// this part is necessary for the fast apply statement
 	ActionModel->memoize(dims[2]);
 	// VI->load_map("../70x70_map.png");
+
+	// VI->load_map("../maps/parking_goal_map_left.png");
+	VI->load_map("../maps/parking_map_2b.png");
+	// VI->load_map("../maps/parking_goal_map_right.png");
+	VI->load_3D_omap("../maps/dilated_parking_map2/dilated_parking_summary.yaml");
 	
-	// goal info
-	VI->load_map("../maps/210x210_kitchen2.png");
+	// // goal info
+	// VI->load_map("../maps/210x210_kitchen2.png");
 	
-	// 3d occupancy obstacle info
-	VI->load_3D_omap("../maps/dilated_kitchen/dilated_kitchen_summary.yaml");
+	// // 3d occupancy obstacle info
+	// // VI->load_3D_omap("../maps/dilated_kitchen/dilated_kitchen_summary.yaml");
+	// VI->load_3D_omap("../maps/dilated_kitchen_inv/dilated_kitchen_summary.yaml");
 	// return;
 
 	// VI->load_map("../kitchen_2.png");
@@ -201,7 +210,7 @@ void nonholonomic_action2() {
 	if (steps < 0) {
 		int i = 0;
 		bool useful_update = true;
-		while (useful_update) {
+		while (useful_update and i < 180) {
 			std::cout << "Step: " << i << std::endl;
 			VI->step();
 			VI->save_slice(slice, max_cost, "./sequence/" + padded(i+1,4) + ".png");
@@ -231,7 +240,9 @@ void nonholonomic_action2() {
 		VI->save_policy(i,"./policy_slices/" + padded(i,3) + ".png");
 	}
 
-	VI->save_full_policy("./serialized/parallel_park");
+	// VI->save_full_policy("./serialized/parallel_park2");
+	// VI->save_full_policy("./serialized/parallel_park_basement_left");
+	VI->save_full_policy("./serialized/parallel_park_modified2");
 
 	// serialize policy and cost function to the file system for analysis elsewhere
 	VI->serialize_cost("./serialized/cost.object");
