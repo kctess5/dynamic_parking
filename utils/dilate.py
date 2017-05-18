@@ -50,7 +50,7 @@ class Car(object):
 		if center == None:
 			center = self.base_frame / cell_size
 
-		corners = np.array([[0,0], [dims[0]+padding,0], dims+padding, [0,dims[1]+padding], [0,0]])
+		corners = np.array([[0,0], [dims[0]+padding,0], dims+padding, [0,dims[1]+padding], [0,0]], dtype=np.float64)
 		corners -= center
 		corners -= padding / 2.0
 

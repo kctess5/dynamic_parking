@@ -48,7 +48,7 @@
 #define MAX_COST 100000
 #define DISCOUNT 1.0
 #define CHANGE_PENALTY 0.05
-#define REVERSAL_PENALTY 60.0
+#define REVERSAL_PENALTY 10.0
 #define DEFLECTION_PENALTY 0.0
 
 #define _USE_INTERPOLATION 1
@@ -80,6 +80,11 @@ std::string padded(int val, int num_zeros) {
   std::ostringstream ss;
   ss << std::setw(num_zeros) << std::setfill('0') << val;
   return ss.str();
+}
+
+// templated sign function
+template <typename T> T sgn(T val) {
+    return (T(0) < val) - (val < T(0));
 }
 
 namespace dp {
@@ -608,9 +613,6 @@ namespace dp {
 		std::vector<NonHolonomicAction<T> > enumerate() {
 			std::vector<NonHolonomicAction<T> > actions;
 
-			
-			
-
 			T step = max_steer / discretization;
 
 			// forward direction angular sweep
@@ -738,6 +740,204 @@ namespace dp {
 		T wheelbase;
 		int discretization;
 
+		T* memo;
+		T* trigTable;
+	};
+
+	template <typename T>
+	class EmpericalNonHolonomicModel
+	{
+	public:
+		EmpericalNonHolonomicModel(T ss, int disc, T scale) : step_size(ss), discretization(disc), world_scale(scale) {};
+		~EmpericalNonHolonomicModel() {};
+
+		std::vector<NonHolonomicAction<T> > enumerate() {
+			std::vector<NonHolonomicAction<T> > actions;
+
+			T step = max_steer / discretization;
+
+			// forward direction angular sweep
+			T angle = max_steer;
+			for (int i = 0; i < discretization; ++i) {
+				actions.push_back(NonHolonomicAction<T>(angle, 1));
+				angle -= step;
+			}
+			// forward direction forwards
+			actions.push_back(NonHolonomicAction<T>(0.0, 1));
+			angle = -step;
+			for (int i = 0; i < discretization; ++i) {
+				actions.push_back(NonHolonomicAction<T>(angle, 1));
+				angle -= step;
+			}
+
+			// backward direction angular sweep
+			angle = max_steer;
+			for (int i = 0; i < discretization; ++i) {
+				actions.push_back(NonHolonomicAction<T>(angle, -1));
+				angle -= step;
+			}
+
+			// backward direction straight
+			actions.push_back(NonHolonomicAction<T>(0.0, -1));
+			angle = -step;
+			for (int i = 0; i < discretization; ++i) {
+				actions.push_back(NonHolonomicAction<T>(angle, -1));
+				angle -= step;
+			}
+
+			return actions;
+		};
+
+		void memoize(int theta_disc) {
+			memo = new T[3 * discretization];
+			trigTable = new T[3 * theta_disc];
+
+			T step = max_steer / discretization;
+
+			// forward direction angular sweep
+			T angle = max_steer;
+			for (int i = 0; i < discretization; ++i) {
+				int index = round(angle * (float)discretization / max_steer) - 1;
+				
+				// dt = action.throttle * step_size * tanAngle / wheelbase;
+				// dy = (1.0-cos(dt))*wheelbase / tanAngle;
+				// dx = wheelbase * sin(dt) / tanAngle;
+
+				// // T tanAngle = tan(angle);
+				// memo[3*index] = step_size * tanAngle / wheelbase;
+				// memo[3*index+1] = (1.0-cos(memo[3*index]))*wheelbase / tanAngle;
+				// memo[3*index+2] = wheelbase * sin(memo[3*index]) / tanAngle;
+				T R = steering_arc_radius(angle);
+
+				memo[3*index]   = step_size / R;
+				memo[3*index+1] = (1.0-cos(memo[3*index]))*R;
+				memo[3*index+2] = sin(memo[3*index])*R;
+				
+				angle -= step;
+			}
+
+			for (int i = 0; i < theta_disc; ++i)
+			{
+				T angle = (M_2PI * (T)(i) / (T)(theta_disc));
+				trigTable[i*2] = cos(angle);
+				trigTable[i*2+1] = sin(angle);
+			}
+		}
+
+		// given a positive steering angle, returns the expected steering arc radius
+		//    angle (0, ackerman_transition_begin) uses ackermann geometry
+		//    angle (ackerman_transition_begin, ackerman_transition_end) interpolates ackermann geometry and emperical model
+		//    angle (ackerman_transition_end, max_steer) uses emperical model
+		//    angle (max_steer, inf) uses emperical model with max_steer as the angle
+		T steering_arc_radius(T angle) {
+			T unscaled_radius = 0.0;
+			if (angle <= ackerman_transition_begin) {
+				unscaled_radius = wheelbase / tan(angle);
+			} else if (angle >= ackerman_transition_end) {
+				angle = std::min(angle, max_steer);
+				unscaled_radius = 1.0 / (angle * angle * poly_a + angle * poly_b + poly_c);
+			} else {
+				// interpolation value
+				T t = (angle - ackerman_transition_begin) / (ackerman_transition_end - ackerman_transition_begin);
+				unscaled_radius = (1.0 - t) * (wheelbase / tan(angle)) + t * (1.0 / (angle * angle * poly_a + angle * poly_b + poly_c));
+			}
+
+			// this case should never happen
+			assert(unscaled_radius != 0.0);
+			return unscaled_radius * world_scale;
+		}
+
+		// in this case, z is not scaled, it is in indicies
+		void applyFast(NonHolonomicAction<T> action, T x, T y, T z, int zi, T &ax, T &ay, T &az) {
+			if (action.throttle == 0) {
+				ax = x; ay = y; az = z;
+			} else {
+				T dt = 0.0;
+				T dy = 0.0;
+				T dx = 0.0;
+				if (action.steering_angle == 0) {
+					dx = action.throttle * step_size;
+				} else {
+					int index = 3*(round(fabs(action.steering_angle) * (float)discretization / max_steer) - 1);
+
+					// std::cout << "a: " << action.steering_angle << " i: " << index << " " << fabs(action.steering_angle) << std::endl;
+					dt = memo[index];
+					dy = memo[index+1];
+					dx = memo[index+2];
+
+					if (action.throttle < 0) {
+						dt = -dt;
+						dx = -dx;
+					}
+
+					if (action.steering_angle < 0) {
+						dy = -dy;
+						dt = -dt;
+					}
+				}
+
+				T c = trigTable[zi*2];
+				T s = trigTable[zi*2+1];
+
+				// std::cout << c << " " << s << " " << dx << " " << dy << " " << dt << " " << std::endl;
+				ax = c*dx - s*dy + x;
+				ay = s*dx + c*dy + y;
+				az = dt + z;
+			}
+		}
+
+		void apply(NonHolonomicAction<T> action, T x, T y, T z, T &ax, T &ay, T &az) {
+			if (action.throttle == 0) {
+				ax = x; ay = y; az = z;
+			} else {
+				// compute local coordinate frame deltas
+				T dt = 0.0;
+				T dy = 0.0;
+				T dx = 0.0;
+				if (action.steering_angle > _EPSILON || action.steering_angle < -_EPSILON) {
+					T R = steering_arc_radius(fabs(action.steering_angle));
+					T sign = sgn(action.steering_angle);
+					dt = sign * action.throttle * step_size / R;
+					dy = sign * (1.0-cos(dt))*R;
+					dx = sign * sin(dt)*R;
+				} else {
+					dx = action.throttle * step_size;
+				}
+
+				// convert the above to global coordinate frame
+				T c = cos(z);
+				T s = sin(z);
+
+				// std::cout << c << " " << s << " " << dx << " " << dy << " " << dt << " " << std::endl;
+				ax = c*dx - s*dy + x;
+				ay = s*dx + c*dy + y;
+				az = dt + z;
+			}
+		}
+
+		T cost(NonHolonomicAction<T> action) { 
+			if (action.throttle == 0) return 0.0;
+			if (action.steering_angle == 0) return step_size;
+			return step_size + DEFLECTION_PENALTY * step_size * fabs(action.steering_angle) / max_steer;
+		}
+
+		T max_affect_distance() { return step_size + 0.5; }
+	
+	private:
+		// variables
+		T world_scale;
+		T step_size;
+		int discretization;
+
+		// model constants
+		T max_steer = 0.335;
+		T wheelbase = 0.23;
+		T poly_a = -4.035;
+		T poly_b =  5.153;
+		T poly_c = -0.018;
+		T ackerman_transition_begin = 0.095;
+		T ackerman_transition_end = 0.105;
+		
 		T* memo;
 		T* trigTable;
 	};
@@ -1039,12 +1239,12 @@ namespace dp {
 		}
 	};
 
-	template <typename state_T>
-	class NonHolonomicIterator : public AbstractValueIterator<state_T, NonHolonomicAction<state_T>, NonHolonomicModel<state_T> >
+	template <typename state_T, typename actionModel_T>
+	class NonHolonomicIterator : public AbstractValueIterator<state_T, NonHolonomicAction<state_T>, actionModel_T >
 	{
 	public:
 		NonHolonomicIterator(std::vector<int> &d, std::vector<float> &min_v, std::vector<float> &max_v) 
-			: AbstractValueIterator<state_T, NonHolonomicAction<state_T>, NonHolonomicModel<state_T> >(d, min_v, max_v) {}
+			: AbstractValueIterator<state_T, NonHolonomicAction<state_T>, actionModel_T >(d, min_v, max_v) {}
 
 		virtual std::string debug_action(NonHolonomicAction<state_T> action) { return " |" + std::to_string(action.steering_angle) + "  " + std::to_string(action.throttle) + "| "; }
 			
@@ -1074,12 +1274,12 @@ namespace dp {
 		}
 	};
 
-	template <typename state_T>
-	class NonHolonomicIteratorLargeSpace : public NonHolonomicIterator<state_T>
+	template <typename state_T, typename actionModel_T>
+	class NonHolonomicIteratorLargeSpace : public NonHolonomicIterator<state_T, actionModel_T>
 	{
 	public:
 		NonHolonomicIteratorLargeSpace(std::vector<int> &d, std::vector<float> &min_v, std::vector<float> &max_v) 
-			: NonHolonomicIterator<state_T>(d, min_v, max_v) {
+			: NonHolonomicIterator<state_T, actionModel_T>(d, min_v, max_v) {
 				// these are for backwards motion
 				J2 = new Array3D<state_T>(this->dims[0], this->dims[1], this->dims[2]);
 				J2->fill(MAX_COST);
@@ -1181,6 +1381,8 @@ namespace dp {
 			std::cout << "Serializing full policy to: " << path << std::endl;
 			std::stringstream policy1;
 			std::stringstream policy2;
+			std::stringstream cost1;
+			std::stringstream cost2;
 			std::stringstream summary;
 
 			char *full_path = realpath(path.c_str(), NULL);
@@ -1190,7 +1392,9 @@ namespace dp {
 			summary << T1 << "\"d1\": " << J2->d1 << "," << std::endl;
 			summary << T1 << "\"d2\": " << J2->d2 << "," << std::endl;
 			summary << T1 << "\"forwards_policy\": \"" << full_path << "/policy_forwards.object\"," << std::endl;
-			summary << T1 << "\"backwards_policy\": \"" << full_path << "/policy_backwards.object\"" << std::endl;
+			summary << T1 << "\"backwards_policy\": \"" << full_path << "/policy_backwards.object\"," << std::endl;
+			summary << T1 << "\"forwards_cost\": \"" << full_path << "/cost_forwards.object\"," << std::endl;
+			summary << T1 << "\"backwards_cost\": \"" << full_path << "/cost_backwards.object\"" << std::endl;
 			summary << "}}" << std::endl;
 
 
@@ -1198,6 +1402,9 @@ namespace dp {
 			{
 				policy1 << this->Policy->pool[i].to_string2() << "\n"; 
 				policy2 << Policy2->pool[i].to_string2() << "\n"; 
+
+				cost1 << this->J->pool[i] << "\n"; 
+				cost2 << J2->pool[i] << "\n"; 
 			}
 
 			std::ofstream file;  
@@ -1214,6 +1421,16 @@ namespace dp {
 			file3.open(path + "/policy_backwards.object");
 			file3 << policy2.str();
 			file3.close();
+
+			std::ofstream file4;  
+			file4.open(path + "/cost_forwards.object");
+			file4 << cost1.str();
+			file4.close();
+
+			std::ofstream file5;  
+			file5.open(path + "/cost_backwards.object");
+			file5 << cost2.str();
+			file5.close();
 
 			free(full_path);
 		}
